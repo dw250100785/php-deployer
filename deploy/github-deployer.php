@@ -20,9 +20,8 @@ class GithubDeployer {
   // ['target'] string  Required  Deployment directory.
   // ['secret'] string  Optional  Secret access token. Defaults to false.
   // ['branch'] string  Optional  Respository branch. Defaults to 'master'.
-  // ['ignore'] string  Optional  Array of files and folders to ignore. Defaults to array('.git').
   // ['debug']  string  Optional  Debug output flag. Defaults to false.
-  // ['temp']   array   Optional  Temporary directory to store files. Defaults to /tmp/md5($config['remote'])
+  // ['temp']   string  Optional  Temporary directory to store files. Defaults to /tmp/md5($config['remote'])
   public function __construct ($config) {
 
     // Validate configuration parameter
@@ -44,7 +43,6 @@ class GithubDeployer {
     $default = array(
       'secret' => FALSE,
       'branch' => 'master',
-      'ignore' => array('.git'),
       'debug' => FALSE,
       'temp' => '/tmp/' . md5($config['remote'])
     );
@@ -66,13 +64,16 @@ class GithubDeployer {
     // Array of commands and their output messages
     $commands = array();
 
-    // Remove the temporary directory if it exists
-    $commands[] = array(
-      'Removing old temporary directory.',
-      sprintf('rm -rf %s',
-        $this->config['temp']
-      )
-    );
+    // If the temporary directory already exists
+    if (file_exists($this->config['temp'])) {
+      // Remove the temporary directory
+      $commands[] = array(
+        'Removing temporary directory.',
+        sprintf('rm -rf %s',
+          $this->config['temp']
+        )
+      );
+    }
 
     // Create the temporary directory
     $commands[] = array(
@@ -92,11 +93,19 @@ class GithubDeployer {
       )
     );
 
+    // Array of files and folders to ignore
+    $ignore = array('--exclude \'.git\'');
+    // Compile list of files and folders to ignore from .gitignore file
+    $handle = fopen($this->config['temp'] . '/.gitignore', 'r');
+    while ($handle && (($buffer = fgets($handle, 4096)) !== false)) {
+      $ignore[] = '--exclude \'' . trim($buffer) . '\'';
+    }
+
     // Sync target directory with cloned repository files
     $commands[] = array(
       'Syncing target directory with cloned repository files.',
       sprintf('rsync -a --delete %s %s %s',
-        array_map(function ($f) { return '--exclude=' . $f; }, $this->config['ignore']),
+        implode(' ', $ignore),
         $this->config['remote'],
         $this->config['temp']
       )
@@ -152,8 +161,10 @@ class GithubDeployer {
     if ($this->config['secret']) {
       // Secret access token signature not given, invalid request
       if (!array_key_exists('HTTP_X_HUB_SIGNATURE', $_SERVER)) return false;
+      // Expected hash to check for
+      $expected = 'sha1=' . hash_hmac('sha1', file_get_contents('php://input'), $this->config['secret']);
       // Secret access token signature does not match expected signature, invalid request
-      if ($_SERVER['HTTP_X_HUB_SIGNATURE'] != 'sha1=' . hash_hmac('sha1', file_get_contents('php://input'), $this->config['secret'])) return false;
+      if ($_SERVER['HTTP_X_HUB_SIGNATURE'] != $expected) return false;
     }
     // Valid request
     return true;

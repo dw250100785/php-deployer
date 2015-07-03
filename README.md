@@ -39,6 +39,58 @@ Trigger the first time authentication message and verify you are able to pull as
 sudo -u www-data git clone git@github.com:yourusername/yourrepository.git
 ```
 
+## Usage
+
+Here is an example of some basic usage of the GitHub Deployer interface.
+
+```php
+<?php
+// Require the GitHub Deployer class
+require_once 'github-deployer.php';
+
+// Initialize the deployer instance with some configuration
+$deployer = new GithubDeployer(array(
+  // The ssh url for the remote repository to deploy
+  'remote' => 'git@github.com:yourusername/yourrepository.git',
+  // The secret access token to authenticate requests by
+  'secret' => 'yoursecretaccesstoken',
+  // The local target directory to deploy the repository files to
+  'target' => '/var/www/www.yourwebsite.com'
+));
+
+// Deploy the repository on authenticated requests
+$deployer->deploy();
+?>
+```
+
+Here is a breakdown of all of the required and optional arguments you can pass in your configuration array.
+
+```
+['remote'] string  Required  Repository ssh url.
+```
+
+```
+['target'] string  Required  Deployment directory.
+```
+
+```
+['secret'] string  Optional  Secret access token. Defaults to false.
+```
+
+```
+['branch'] string  Optional  Respository branch. Defaults to 'master'.
+```
+
+```
+['debug']  string  Optional  Debug output flag. Defaults to false.
+```
+
+```
+['temp']   string  Optional  Temporary directory to store files. Defaults to /tmp/md5($config['remote'])
+```
+
+The interface will automatically ignore the `.git` folder when syncing to the local target directory. You can also add a `.gitignore` file in your remote repository, the interface will consider all of the contents in this file, and ignore any listed files in there when syncing as well.
+
 ## License
 
 ```
