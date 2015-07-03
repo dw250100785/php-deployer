@@ -59,7 +59,7 @@ class GithubDeployer {
 
   // Main deployment function
   public function deploy () {
-    
+
     // Validate the secret request token
     if (!$this->valid_request()) $this->throw_error('Invalid request authentication.', 403);
 
@@ -86,9 +86,9 @@ class GithubDeployer {
     $commands[] = array(
       'Cloning repository files into temporary directory.',
       sprintf('git clone --branch %s %s %s',
-        $this->config['ignore'],
+        $this->config['branch'],
         $this->config['target'],
-        $this->config['temp'] . '/'
+        $this->config['temp']
       )
     );
 
