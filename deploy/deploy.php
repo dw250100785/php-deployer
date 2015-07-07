@@ -1,73 +1,59 @@
 <?php
 
 /*
-* Documentation
-*/
-
-// Response Codes
-// 200 - Server deployment successful
-// 400 - Invalid client configuration
-// 403 - Invalid request authentication
-// 500 - Error while trying to deploy
-
-// Configuration Keys
-// REMOTE   Required  Default: N/A                Remote repository url to synch target directory with.
-// TARGET   Required  Default: N/A                Local directory to synch remote repository files to.
-// BRANCH   Optional  Default: master             Remote repository branch to synch target directory with.
-// TEMP     Optional  Default: /tmp/md5(REMOTE)/  Temporary directory to pull files to before synching.
-// SECRET   Optional  Default: FALSE              Secret access token used to authenticate all requests.
-// DEBUG    Optional  Default: FALSE              Flag to indicate the output of debugging information.
-// LOG      Optional  Default: FALSE              Log file location used to store deployment logs.
-
-/*
 * Configuration
 */
 
-// Configuration file validation
-if (!file_exists('config.php')) { terminate('Configuration file required.', 400); }
-require_once 'config.php';
+// Require the configuration
+require_once 'deploy-config.php';
 
-// Configuration defaulting
-if (!defined('REMOTE')) { terminate('REMOTE configuration parameter required.', 400); }
-if (!defined('TARGET')) { terminate('TARGET configuration parameter required.', 400); }
-if (!defined('BRANCH')) { define('BRANCH', 'master'); }
-if (!defined('TEMP'))   { define('TEMP', '/tmp/' . md5(REMOTE)); }
-if (!defined('SECRET')) { define('SECRET', FALSE); }
-if (!defined('IGNORE')) { define('IGNORE', FALSE); }
-if (!defined('DEBUG'))  { define('DEBUG', FALSE); }
-if (!defined('LOG'))    { define('LOG', FALSE); }
+// Default configuration
+$GLOBALS['config'] = array();
+// Initialize the log array
+$GLOBALS['log'] = array();
 
-// Configuration validation
-if (!is_string(REMOTE))                       { terminate('REMOTE configuration parameter must be of type string.', 400); }
-if (!is_string(TARGET))                       { terminate('TARGET configuration parameter must be of type string.', 400); }
-if (!is_string(BRANCH))                       { terminate('BRANCH configuration parameter must be of type string.', 400); }
-if (!is_string(TEMP))                         { terminate('TEMP configuration parameter must be of type string.', 400); }
-if (SECRET && !is_string(SECRET))             { terminate('SECRET configuration parameter must be of type string or FALSE.', 400); }
-if (IGNORE && !is_array(unserialize(IGNORE))) { terminate('IGNORE configuration parameter must be of type array or FALSE.', 400); }
-if (!is_bool(DEBUG))                          { terminate('DEBUG configuration parameter must be of type boolean.', 400); }
-if (LOG && !is_string(LOG))                   { terminate('LOG configuration parameter must be of type string or FALSE.', 400); }
+// Configuration defined
+if (defined('CONFIG')) {
+  // Unserialize the configuration
+  $GLOBALS['config'] = unserialize(CONFIG);
+  // Invalid configuration
+  if (!is_array($GLOBALS['config'])) {
+    // Log a message
+    $GLOBALS['log'][] = 'Error: Configuration must be a valid serialized array.';
+    // Terminate
+    terminate(400);
+  }
+}
+
+// Merge specified configuration with default configuration
+$GLOBALS['config'] = array_merge(array(
+  'remote' => 'https://github.com/Swiper-CCCVI/php-github-deploy.git',
+  'target' => '/var/www/default',
+  'branch' => 'master',
+  'temp' => '/tmp/php-github-deploy',
+  'logfile' => '/log/php-github-deploy.log',
+  'secret' => FALSE,
+  'debug' => FALSE,
+  'log' => FALSE
+), $GLOBALS['config']);
 
 /*
 * Functions
 */
 
 // Terminate the program with a response code
-function terminate ($message=FALSE, $code) {
-  // If a message is given, add it
-  if ($message) { message($message); }
-  // If the debug flag is true
-  if (defined('DEBUG') && DEBUG === TRUE) {
-    // Print all of the messages
-    foreach ($GLOBALS['github-deploy-log'] as $message) { echo '<p>' . $message . '</p>' . "\r\n"; }
+function terminate ($code) {
+  // If debugging is enabled
+  if ($GLOBALS['config']['debug']) {
+    // Print the log array
+    echo implode("\r\n", $GLOBALS['log']);
   }
-  // If the log file location is set
-  if (defined('LOG') && is_string(LOG)) {
-    // Write the current date and time
-    file_put_contents(LOG, date('Y-m-d H:i:s') . '\n');
-    // Write all of the messages
-    foreach ($GLOBALS['github-deploy-log'] as $message) { file_put_contents(LOG, $message . '\n'); }
-    // Write an empty line
-    file_put_contents(LOG, '\n');
+  // If logging is enabled
+  if ($GLOBALS['config']['log']) {
+    // Put the current date and time in the log file
+    file_put_contents($GLOBALS['config']['logfile'], date('Y-m-d H:i:s') . "\r\n");
+    // Put the log array in the log file and add a line of space from the next entry
+    file_put_contents($GLOBALS['config']['logfile'], implode("\n", $GLOBALS['log']) . "\r\n\r\n");
   }
   // Set the response code
   http_response_code($code);
@@ -75,59 +61,72 @@ function terminate ($message=FALSE, $code) {
   exit();
 }
 
-// Add a new message
-function message ($message) {
-  // Initialize the array of messages if not done
-  if (!isset($GLOBALS['github-deploy-log'])) { $GLOBALS['github-deploy-log'] = array(); }
-  // Add the given message
-  $GLOBALS['github-deploy-log'][] = $message;
+function cmd($command) {
+  $GLOBALS['log'][] = $command;
+  exec($command . ' 2>&1', $output, $error);
+  if ($error) {
+    $GLOBALS['log'][] = 'Error: ' . implode(' ', $output);
+    terminate(500);
+  }
 }
 
 /*
 * Deployment
 */
 
-// Print a starting message
-message('Starting deployment.');
+// Log a starting message
+$GLOBALS['log'][] = 'Starting deployment.';
+
+// Log the set configuration
+$GLOBALS['log'][] = var_dump($GLOBALS['config']);
 
 // If the secret access token is set
-if (SECRET) {
-  // Exit with a message if secret access token signature was not passed
-  if (!array_key_exists('HTTP_X_HUB_SIGNATURE', $_SERVER)) { terminate('Invalid request authentication.', 403); }
+if ($GLOBALS['config']['secret']) {
+  // Secret access token signature was not passed
+  if (!array_key_exists('HTTP_X_HUB_SIGNATURE', $_SERVER)) {
+    // Log a message
+    $GLOBALS['log'][] = 'Error: Missing request secret access token signature.';
+    // Terminate
+    terminate(403);
+  }
   // Produce the signature that we expect to see
-  $expected = 'sha1=' . hash_hmac('sha1', file_get_contents('php://input'), SECRET);
+  $expected = 'sha1=' . hash_hmac('sha1', file_get_contents('php://input'), $GLOBALS['config']['secret']);
   // Exit with a message if secret access token signature does not match what we expected
-  if ($_SERVER['HTTP_X_HUB_SIGNATURE'] != $expected) { terminate('Invalid request authentication.', 403); }
+  if ($_SERVER['HTTP_X_HUB_SIGNATURE'] != $expected) {
+    // Log a message
+    $GLOBALS['log'][] = 'Error: Invalid request secret access token signature.';
+    // Terminate
+    terminate(403);
+  }
 }
 
-// Format IGNORE for use in rsynch
-$ignore = array();
-if (IGNORE) { foreach (unserialize(IGNORE) as $i) { $ignore[] = '--exclude=' . $i; } }
+// Remove the temporary directory
+cmd(sprintf('rm -rf %s', $GLOBALS['config']['temp']));
 
-// Array of commands
-$commands = array(
-  // Remove possible temporary directory
-  sprintf('rm -rf %s', TEMP),
-  // Create the new temporary directory
-  sprintf('mkdir %s', TEMP),
-  // Clone the repository files into the temporary directory
-  sprintf('git clone --branch %s %s %s', BRANCH, REMOTE, TEMP),
-  // Synch the target directory with the temporary directory
-  sprintf('rsync -a --delete %s %s %s', implode(' ', $ignore), TEMP . '/', TARGET),
-  // Remove the temporary directory
-  sprintf('rm -rf %s', TEMP)
-);
+// Create the temporary directory
+cmd(sprintf('mkdir %s', $GLOBALS['config']['temp']));
 
-// Loop through each command
-foreach ($commands as $command) {
-  // Print the command
-  message($command);
-  // Execute the command
-  exec($command . ' 2>&1', $output, $error);
-  // Exit with a message on any error
-  if ($error) { terminate('Error: ' . implode(' ', $output), 500); }
+// Clone the repository into the target directory
+cmd(sprintf('git clone --branch %s %s %s', $GLOBALS['config']['branch'], $GLOBALS['config']['remote'], $GLOBALS['config']['temp']));
+
+// Remove files from the temporary directory according to the new .ignore file
+$ignore_handle = fopen($GLOBALS['config']['temp'] . '/' . dirname($_SERVER['SCRIPT_NAME']) . '/deploy-ignore', 'r');
+if ($ignore_handle) {
+  while (($line = fgets($ignore_handle)) !== FALSE) {
+    cmd(sprintf('rm -rf %s', $GLOBALS['config']['temp'] . '/' . trim($line)));
+  }
+  fclose($ignore_handle);
 }
 
-// Terminate with a success message
-terminate('Deployment successful.', 200);
+// Sync the temporary directory to the target directory
+cmd(sprintf('rsync -a --delete %s %s', $GLOBALS['config']['temp'] . '/', $GLOBALS['config']['target']));
+
+// Remove the temporary directory
+cmd(sprintf('rm -rf %s', $GLOBALS['config']['temp']));
+
+// Log a success message
+$GLOBALS['log'][] = 'Deployment successful.';
+// Terminate
+terminate(200);
+
 ?>
