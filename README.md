@@ -1,3 +1,6 @@
+# IMPORTANT
+For right now, this repository is fairly untested and will be getting a lot of updates. I will continue to update this README file so you can know the stability of this repository. I am revamping a lot of features based on feedback and my testing results.
+
 # php-github-deploy
 An interface to deploy repository files to a web server using GitHub Webhook requests.
 
